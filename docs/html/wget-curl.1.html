@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WGET-CURL</title>
+<style>
+:root { --fg:#1f2328; --muted:#656d76; --line:#d8dee4; --bg-pre:#f6f8fa; --link:#0969da; }
+* { box-sizing: border-box; }
+body { max-width: 50rem; margin: 2.5rem auto 5rem; padding: 0 1.25rem;
+       color: var(--fg); line-height: 1.75;
+       font: 16px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", Roboto, sans-serif; }
+h1 { font-size: 1.75rem; margin: 0 0 .35rem; }
+h2 { font-size: 1.2rem; margin: 2.2rem 0 .8rem; padding-bottom: .3rem;
+     border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 .6rem; }
+p  { margin: .55rem 0; }
+pre { margin: .7rem 0; padding: .75rem 1rem; overflow-x: auto;
+      background: var(--bg-pre); border: 1px solid var(--line); border-radius: 6px;
+      font: .9rem/1.6 Consolas, "Cascadia Mono", Menlo, monospace; }
+code { font: .9em/1.5 Consolas, "Cascadia Mono", Menlo, monospace;
+       background: var(--bg-pre); padding: .1em .35em; border-radius: 4px; }
+dl { margin: .5rem 0 1.2rem; }
+dt { font-weight: 600; margin-top: .9rem; }
+dt + dd { margin-top: .1rem; }
+dd { margin: .1rem 0 0 1.5rem; }
+dd p { margin: .3rem 0; }
+.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1.6rem; }
+</style>
+</head>
+<body>
+<h1>WGET-CURL</h1>
+<p class="meta">pjfetch 0.1.0 · section 1 · 2026-10-15</p>
+<h2>NAME</h2>
+<p>wget-curl - 多段并发 HTTP(S) 下载器（IDM 风格）</p>
+<h2>SYNOPSIS</h2>
+<p><b>wget-curl</b> [<i>para-jobs=</i> N<i>]</i> [<i>options</i>] <i>url</i></p>
+<h2>DESCRIPTION</h2>
+<p><b>wget-curl</b> 基于 <b>libpjfetch</b> (3) 下载 HTTP/HTTPS 资源：探测到服务器支持 Range 后切成若干段并行下载（默认 8 段），每段独立重试，中断后可断点续传。服务器不支持 Range、文件过小、或&quot;宣称支持却不兑现&quot;（对 Range 请求返回 200）时，自动退化为单流。</p>
+<p>进度显示在 stderr；下载内容写入文件，日志与状态不混入数据流。</p>
+<h2>FIRST ARGUMENT</h2>
+<dl>
+<dt><b>para-jobs=</b> <i>N</i></dt><dd>
+<p>并行分段数。必须是第一个参数（若存在），<i>N</i> 会被钳到 1..32，默认 8。该参数出现在非首位、或数值非法时为用法错误。首个位置参数若不匹配 <i>para-jobs=</i>, 则视为 URL。</p>
+</dd>
+</dl>
+<h2>OPTIONS</h2>
+<dl>
+<dt><b>-O</b> <i>path</i></dt><dd>
+<p>输出到精确路径（目录与文件名均以该值为准）。</p>
+</dd>
+<dt><b>-P</b> <i>dir</i></dt><dd>
+<p>输出到目录前缀，文件名由 URL 或 Content-Disposition 推导。</p>
+</dd>
+<dt><b>-c</b></dt><dd>
+<p>启用断点续传（默认即开启，此开关为显式冗余）。</p>
+</dd>
+<dt><b>--no-resume</b></dt><dd>
+<p>关闭断点续传：忽略既有 <i>.part</i> 与 <i>.pjmeta</i>, 从头开始。</p>
+</dd>
+<dt><b>--retry</b> <i>N</i></dt><dd>
+<p>每段最大重试次数，默认 5。重试采用指数退避（上限 8 秒），并从该段已完成偏移继续。</p>
+</dd>
+<dt><b>--timeout</b> <i>S</i></dt><dd>
+<p>单次传输的整体超时（秒）。0（默认）表示不限。</p>
+</dd>
+<dt><b>--connect-timeout</b> <i>S</i></dt><dd>
+<p>连接超时（秒），默认 15。</p>
+</dd>
+<dt><b>--low-speed-limit</b> <i>B</i></dt><dd>
+<p>低速中止阈值（字节/秒）。配合 <b>--low-speed-time</b> 使用，用于检测&quot;连接已建立但传输停滞&quot;。</p>
+</dd>
+<dt><b>--low-speed-time</b> <i>S</i></dt><dd>
+<p>上述低速状态需持续 S 秒才中止，默认 20。</p>
+</dd>
+<dt><b>-U,</b> <b>--user-agent</b> <b>S</b></dt><dd>
+<p>User-Agent 字符串。</p>
+</dd>
+<dt><b>--header</b> <i>&quot;K: V&quot;</i></dt><dd>
+<p>附加请求头，可重复；多个头以 CRLF 拼接。</p>
+</dd>
+<dt><b>--referer</b> <i>S</i></dt><dd>
+<p>Referer 请求头。</p>
+</dd>
+<dt><b>--proxy</b> <i>S</i></dt><dd>
+<p>代理 URL。未指定时沿用 libcurl 的环境变量约定。</p>
+</dd>
+<dt><b>--no-check-certificate</b></dt><dd>
+<p>跳过 TLS 证书校验（默认校验）。</p>
+</dd>
+<dt><b>-q</b></dt><dd>
+<p>安静模式：不显示进度与状态行。</p>
+</dd>
+<dt><b>-v</b></dt><dd>
+<p>详细模式：把 libcurl 的调试输出打到 stderr。</p>
+</dd>
+<dt><b>--show-progress</b> <b>/</b> <b>--no-progress</b></dt><dd>
+<p>强制开启/关闭进度条（默认为：stderr 是终端且未指定 -q 时开启）。</p>
+</dd>
+<dt><b>-h,</b> <b>--help</b></dt><dd>
+<p>显示帮助并退出。</p>
+</dd>
+<dt><b>--version</b></dt><dd>
+<p>显示版本并退出。</p>
+</dd>
+</dl>
+<h2>EXIT STATUS</h2>
+<dl>
+<dt><b>0</b></dt><dd>
+<p>成功。</p>
+</dd>
+<dt><b>1</b></dt><dd>
+<p>网络或 HTTP 失败（不可达、超时、4xx/5xx、重试耗尽等）。</p>
+</dd>
+<dt><b>2</b></dt><dd>
+<p>用法错误（未知选项、缺少 URL、参数非法）。</p>
+</dd>
+<dt><b>3</b></dt><dd>
+<p>本地 I/O 错误（无法写文件、磁盘满）。</p>
+</dd>
+<dt><b>4</b></dt><dd>
+<p>不支持的请求（URL 非法、协议不支持）。</p>
+</dd>
+<dt><b>5</b></dt><dd>
+<p>用户中断（Ctrl+C）。已保存续传状态，可直接 <b>-c</b> 重跑。</p>
+</dd>
+</dl>
+<h2>FILES</h2>
+<dl>
+<dt><i>~/.pjfetch/pj-cfg.cnf</i></dt><dd>
+<p>全局配置。Apache 风格的 Section-Key-Value； <b>[global]</b> 段内的键取长选项名（如 <i>para-jobs=16</i>, <i>retry=5</i>, <i>user-agent=...</i>）。命令行显式给出的选项覆盖配置值。</p>
+</dd>
+<dt><i>~/.pjfetch/pj.ses</i></dt><dd>
+<p>下载会话记录（开始/结束各追加一行，含 URL、输出路径、状态、时间戳）。</p>
+</dd>
+<dt><i>&lt;输出文件名&gt;.pjfetch.dld</i></dt><dd>
+<p>CLI 层控制文件：记录本次的选项快照与状态。成功后删除；失败或中断时保留， <b>-c</b> 重跑时读取校验。</p>
+</dd>
+<dt><i>&lt;输出文件名&gt;.part</i></dt><dd>
+<p>下载中的工作文件。传输完成后被重命名为最终文件名。</p>
+</dd>
+<dt><i>&lt;输出文件名&gt;.pjmeta</i></dt><dd>
+<p>续传 sidecar（库层维护）：记录 URL、总长、ETag/Last-Modified 与各段已完成偏移。恢复前会校验 URL、总长、.part 大小与内容标识，任一不符则丢弃并重新开始。下载成功后自动删除。</p>
+</dd>
+</dl>
+<h2>EXAMPLES</h2>
+<p>8 段并行下载：</p>
+<pre>
+wget-curl para-jobs=8 -O archive.tar.gz https://example.com/archive.tar.gz
+</pre>
+<p>中断后继续（Ctrl+C 退出码 5 之后）：</p>
+<pre>
+wget-curl -c -O archive.tar.gz https://example.com/archive.tar.gz
+</pre>
+<p>经代理下载并带自定义头：</p>
+<pre>
+wget-curl --proxy http://127.0.0.1:8080 \
+          --header &quot;Authorization: Bearer ...&quot; \
+          https://example.com/data.bin
+</pre>
+<h2>NOTES</h2>
+<p>输出文件名推导：取 URL 末段（去 query/fragment）→ percent-decode → 清洗 Windows 非法字符与控制符 → 保留设备名（CON/NUL/COM1 等）追加下划线 → 限长 200 字节并保留扩展名。若未指定 <b>-O</b>, 且响应带 Content-Disposition，则按其中文件名重命名结果。</p>
+<h2>SEE ALSO</h2>
+<p><b>libpjfetch</b> (3), <b>libparajobs</b> (3)</p>
+<h2>AUTHORS</h2>
+<p>pjfetch 项目贡献者。</p>
+</body>
+</html>

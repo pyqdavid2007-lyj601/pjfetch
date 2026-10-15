@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIBPARAJOBS</title>
+<style>
+:root { --fg:#1f2328; --muted:#656d76; --line:#d8dee4; --bg-pre:#f6f8fa; --link:#0969da; }
+* { box-sizing: border-box; }
+body { max-width: 50rem; margin: 2.5rem auto 5rem; padding: 0 1.25rem;
+       color: var(--fg); line-height: 1.75;
+       font: 16px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", Roboto, sans-serif; }
+h1 { font-size: 1.75rem; margin: 0 0 .35rem; }
+h2 { font-size: 1.2rem; margin: 2.2rem 0 .8rem; padding-bottom: .3rem;
+     border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 .6rem; }
+p  { margin: .55rem 0; }
+pre { margin: .7rem 0; padding: .75rem 1rem; overflow-x: auto;
+      background: var(--bg-pre); border: 1px solid var(--line); border-radius: 6px;
+      font: .9rem/1.6 Consolas, "Cascadia Mono", Menlo, monospace; }
+code { font: .9em/1.5 Consolas, "Cascadia Mono", Menlo, monospace;
+       background: var(--bg-pre); padding: .1em .35em; border-radius: 4px; }
+dl { margin: .5rem 0 1.2rem; }
+dt { font-weight: 600; margin-top: .9rem; }
+dt + dd { margin-top: .1rem; }
+dd { margin: .1rem 0 0 1.5rem; }
+dd p { margin: .3rem 0; }
+.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1.6rem; }
+</style>
+</head>
+<body>
+<h1>LIBPARAJOBS</h1>
+<p class="meta">pjfetch 0.1.0 · section 3 · 2026-10-15</p>
+<h2>NAME</h2>
+<p>libparajobs - 基于 libgo 协程的并行任务引擎（C ABI）</p>
+<h2>SYNOPSIS</h2>
+<pre>
+<b>#include</b> <b>&lt;parajobs/parajobs.h&gt;</b>
+
+<b>pjb_engine_t</b> <b>pjb_engine_create(int32_t</b> <b>min_threads,</b> <b>int32_t</b> <b>max_threads);</b>
+<b>void</b> <b>pjb_engine_destroy(pjb_engine_t</b> <b>eng);</b>
+<b>pjb_status</b> <b>pjb_engine_drain(pjb_engine_t</b> <b>eng,</b> <b>uint32_t</b> <b>timeout_ms);</b>
+<b>int32_t</b> <b>pjb_engine_concurrency(pjb_engine_t</b> <b>eng);</b>
+
+<b>pjb_job_id</b> <b>pjb_submit(pjb_engine_t</b> <b>eng,</b> <b>pjb_job_fn</b> <b>fn,</b> <b>void</b> <b>*ud,</b>
+<b>                       pjb_job_done_cb on_done, void *done_ud);</b>
+<b>pjb_status</b> <b>pjb_job_cancel(pjb_engine_t</b> <b>eng,</b> <b>pjb_job_id</b> <b>id);</b>
+<b>int32_t</b> <b>pjb_job_canceled(pjb_engine_t</b> <b>eng,</b> <b>pjb_job_id</b> <b>id);</b>
+<b>pjb_status</b> <b>pjb_job_wait(pjb_engine_t</b> <b>eng,</b> <b>pjb_job_id</b> <b>id,</b> <b>uint32_t</b> <b>timeout_ms);</b>
+<b>int32_t</b> <b>pjb_job_is_done(pjb_engine_t</b> <b>eng,</b> <b>pjb_job_id</b> <b>id);</b>
+
+<b>void</b> <b>pjb_sleep_ms(pjb_engine_t</b> <b>eng,</b> <b>uint32_t</b> <b>ms);</b>
+<b>const</b> <b>char</b> <b>*pjb_version(void);</b>
+</pre>
+<h2>DESCRIPTION</h2>
+<p><b>libparajobs</b> 把 <b>libgo</b> (3) 的协程调度封装为纯 C ABI 的通用并行任务引擎：提交、协作式取消、等待与排空。公共头不泄漏 libgo 或 C++ 类型。</p>
+<p>Windows 上 libgo 用 Win32 Fiber，并在进程级挂钩 winsock 的 <b>select</b> / <b>recv</b> / <b>send</b> / <b>accept</b> 等函数，使阻塞式 socket 调用在协程内自动挂起——故任务体可直接使用阻塞网络 API。</p>
+<h2>TYPES</h2>
+<dl>
+<dt><b>pjb_engine_t</b></dt><dd>
+<p>不透明引擎句柄。每个引擎持有自己的 <b>libgo</b> 调度器。</p>
+</dd>
+<dt><b>pjb_job_id</b></dt><dd>
+<p>任务标识（自 1 递增）； <b>PJB_INVALID_JOB</b> 为 0，表示无效。</p>
+</dd>
+<dt><b>pjb_status</b></dt><dd>
+<p>状态码： <b>PJB_OK</b>, <b>PJB_ERR_INVALID_ARG</b>, <b>PJB_ERR_NOT_INITIALIZED</b>, <b>PJB_ERR_TIMEOUT</b>, <b>PJB_ERR_CANCELED</b>, <b>PJB_ERR_INTERNAL</b>.</p>
+</dd>
+<dt><b>pjb_job_fn</b></dt><dd>
+<p><b>typedef</b> <b>void</b> <b>(*pjb_job_fn)(void</b> <b>*userdata);</b> 在调度线程上执行的任务体。</p>
+</dd>
+<dt><b>pjb_job_done_cb</b></dt><dd>
+<p><b>typedef</b> <b>void</b> <b>(*pjb_job_done_cb)(pjb_job_id</b> <b>id,</b> <b>void</b> <b>*ud);</b><br> 任务结束后恰好触发一次（取消未启动也触发）。回调内禁止对同一引擎调用 <b>pjb_engine_drain</b> 或 <b>pjb_engine_destroy</b>，否则自等死锁。</p>
+</dd>
+</dl>
+<h2>RETURN VALUES</h2>
+<dl>
+<dt><b>pjb_engine_create</b></dt><dd>
+<p>成功返回非空句柄； <i>min_threads</i> &lt;= 0 取硬件并发数； <i>max_threads</i> &lt;= 0 时取 <i>min_threads</i>.</p>
+</dd>
+<dt><b>pjb_submit</b></dt><dd>
+<p>成功返回非零任务 id；引擎无效或参数非法返回 <b>PJB_INVALID_JOB</b>.</p>
+</dd>
+<dt><b>pjb_job_wait</b></dt><dd>
+<p><i>timeout_ms</i> 为 0xFFFFFFFF 表示无限等待；超时返回 <b>PJB_ERR_TIMEOUT</b>, 未知任务 id 返回 <b>PJB_ERR_INVALID_ARG</b>.</p>
+</dd>
+<dt><b>pjb_job_is_done</b><b>,</b> <b>pjb_job_canceled</b></dt><dd>
+<p>返回 1/0；未知 id 或引擎无效返回 -1。</p>
+</dd>
+<dt><b>pjb_engine_concurrency</b></dt><dd>
+<p>返回调度器最大线程数；引擎无效返回 0。</p>
+</dd>
+<dt><b>pjb_engine_drain</b></dt><dd>
+<p>等待未完成任务数归零；超时返回 <b>PJB_ERR_TIMEOUT</b>.</p>
+</dd>
+</dl>
+<h2>THREADING</h2>
+<p>创建与销毁应在单一线程进行。 <b>pjb_submit</b>, <b>pjb_job_wait</b>, <b>pjb_job_cancel</b>, <b>pjb_job_is_done</b> 与 <b>pjb_job_canceled</b> 可从任意线程调用（包括从其他任务体内）。</p>
+<p><b>pjb_engine_destroy</b> 会先排空全部任务（含 <b>on_done</b> 回调）再停止调度器；该操作不可逆，销毁后引擎不可再用。 <b>pjb_job_wait</b> 会阻塞调用线程，不应在协程内使用。</p>
+<h2>NOTES</h2>
+<p><b>pjb_sleep_ms</b> 在调度线程内等价于协程睡眠（让出 fiber）；在普通线程上为标准库睡眠。</p>
+<p>取消是协作式的：置位取消标志后，任务体需自行轮询 <b>pjb_job_canceled</b> 并尽早返回。</p>
+<h2>EXAMPLE</h2>
+<pre>
+static void work(void *ud) {
+        pjb_engine_t e = (pjb_engine_t)ud;
+        for (int i = 0; i &lt; 10; ++i) {
+                if (pjb_job_canceled(e, PJB_INVALID_JOB)) return;
+                /* ... do work ... */
+                pjb_sleep_ms(e, 10);
+        }
+}
+
+pjb_engine_t e = pjb_engine_create(4, 8);
+pjb_job_id id = pjb_submit(e, work, e, NULL, NULL);
+pjb_job_wait(e, id, 0xFFFFFFFFu);
+pjb_engine_destroy(e);
+</pre>
+<h2>SEE ALSO</h2>
+<p><b>libpjfetch</b> (3), <b>wget-curl</b> (1)</p>
+<h2>AUTHORS</h2>
+<p>pjfetch 项目贡献者。</p>
+</body>
+</html>

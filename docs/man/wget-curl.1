@@ -1,0 +1,174 @@
+.\" pjfetch 工程手册页 —— 由 groff 渲染（man / groff -Thtml）
+.TH WGET-CURL 1 "2026-10-15" "pjfetch 0.1.0" "User Commands"
+.SH NAME
+wget\-curl \- 多段并发 HTTP(S) 下载器（IDM 风格）
+.SH SYNOPSIS
+.B wget\-curl
+.RI [ para\-jobs= N ]
+.RI [ options ]
+.I url
+.SH DESCRIPTION
+.B wget\-curl
+基于
+.BR libpjfetch (3)
+下载 HTTP/HTTPS 资源：探测到服务器支持 Range 后切成若干段\fB并行\fP下载（默认 8 段），
+每段独立重试，中断后可断点续传。服务器不支持 Range、文件过小、或"宣称支持却不兑现"
+（对 Range 请求返回 200）时，自动退化为单流。
+.PP
+进度显示在 stderr；下载内容写入文件，日志与状态不混入数据流。
+.SH FIRST ARGUMENT
+.TP
+.BI para\-jobs= N
+并行分段数。必须是\fB第一个参数\fP（若存在），\(*N 会被钳到 1..32，默认 8。
+该参数出现在非首位、或数值非法时为用法错误。
+首个位置参数若不匹配
+.IR para\-jobs= ,
+则视为 URL。
+.SH OPTIONS
+.TP
+.BI \-O " path"
+输出到精确路径（目录与文件名均以该值为准）。
+.TP
+.BI \-P " dir"
+输出到目录前缀，文件名由 URL 或 Content\-Disposition 推导。
+.TP
+.B \-c
+启用断点续传（\fB默认即开启\fP，此开关为显式冗余）。
+.TP
+.B \-\-no\-resume
+关闭断点续传：忽略既有
+.I .part
+与
+.IR .pjmeta ,
+从头开始。
+.TP
+.BI \-\-retry " N"
+每段最大重试次数，默认 5。重试采用指数退避（上限 8 秒），并从该段已完成偏移继续。
+.TP
+.BI \-\-timeout " S"
+单次传输的整体超时（秒）。0（默认）表示不限。
+.TP
+.BI \-\-connect\-timeout " S"
+连接超时（秒），默认 15。
+.TP
+.BI \-\-low\-speed\-limit " B"
+低速中止阈值（字节/秒）。配合
+.B \-\-low\-speed\-time
+使用，用于检测"连接已建立但传输停滞"。
+.TP
+.BI \-\-low\-speed\-time " S"
+上述低速状态需持续 S 秒才中止，默认 20。
+.TP
+.B \-U, \-\-user\-agent S
+User\-Agent 字符串。
+.TP
+.BI \-\-header " \(dqK: V\(dq"
+附加请求头，可重复；多个头以 CRLF 拼接。
+.TP
+.BI \-\-referer " S"
+Referer 请求头。
+.TP
+.BI \-\-proxy " S"
+代理 URL。未指定时沿用 libcurl 的环境变量约定。
+.TP
+.B \-\-no\-check\-certificate
+跳过 TLS 证书校验（默认校验）。
+.TP
+.B \-q
+安静模式：不显示进度与状态行。
+.TP
+.B \-v
+详细模式：把 libcurl 的调试输出打到 stderr。
+.TP
+.B \-\-show\-progress / \-\-no\-progress
+强制开启/关闭进度条（默认为：stderr 是终端且未指定 \-q 时开启）。
+.TP
+.B \-h, \-\-help
+显示帮助并退出。
+.TP
+.B \-\-version
+显示版本并退出。
+.SH EXIT STATUS
+.TP
+.B 0
+成功。
+.TP
+.B 1
+网络或 HTTP 失败（不可达、超时、4xx/5xx、重试耗尽等）。
+.TP
+.B 2
+用法错误（未知选项、缺少 URL、参数非法）。
+.TP
+.B 3
+本地 I/O 错误（无法写文件、磁盘满）。
+.TP
+.B 4
+不支持的请求（URL 非法、协议不支持）。
+.TP
+.B 5
+用户中断（Ctrl+C）。已保存续传状态，可直接
+.B \-c
+重跑。
+.SH FILES
+.TP
+.I ~/.pjfetch/pj\-cfg.cnf
+全局配置。Apache 风格的 Section\-Key\-Value；
+.B [global]
+段内的键取长选项名（如
+.IR para\-jobs=16 ,
+.IR retry=5 ,
+.IR user\-agent=... ）。
+命令行显式给出的选项覆盖配置值。
+.TP
+.I ~/.pjfetch/pj.ses
+下载会话记录（开始/结束各追加一行，含 URL、输出路径、状态、时间戳）。
+.TP
+.I <输出文件名>.pjfetch.dld
+CLI 层控制文件：记录本次的选项快照与状态。成功后删除；失败或中断时保留，
+.B \-c
+重跑时读取校验。
+.TP
+.I <输出文件名>.part
+下载中的工作文件。传输完成后被重命名为最终文件名。
+.TP
+.I <输出文件名>.pjmeta
+续传 sidecar（库层维护）：记录 URL、总长、ETag/Last\-Modified 与各段已完成偏移。
+恢复前会校验 URL、总长、.part 大小与内容标识，任一不符则丢弃并重新开始。
+下载成功后自动删除。
+.SH EXAMPLES
+8 段并行下载：
+.PP
+.nf
+.RS
+wget\-curl para\-jobs=8 \-O archive.tar.gz https://example.com/archive.tar.gz
+.RE
+.fi
+.PP
+中断后继续（Ctrl+C 退出码 5 之后）：
+.PP
+.nf
+.RS
+wget\-curl \-c \-O archive.tar.gz https://example.com/archive.tar.gz
+.RE
+.fi
+.PP
+经代理下载并带自定义头：
+.PP
+.nf
+.RS
+wget\-curl \-\-proxy http://127.0.0.1:8080 \\
+          \-\-header "Authorization: Bearer ..." \\
+          https://example.com/data.bin
+.RE
+.fi
+.SH NOTES
+输出文件名推导：取 URL 末段（去 query/fragment）→ percent\-decode → 清洗 Windows
+非法字符与控制符 → 保留设备名（CON/NUL/COM1 等）追加下划线 → 限长 200 字节并保留扩展名。
+若未指定
+.BR \-O ,
+且响应带 Content\-Disposition，则按其中文件名重命名结果。
+.SH SEE ALSO
+.BR libpjfetch (3),
+.BR libparajobs (3)
+.SH AUTHORS
+pjfetch 项目贡献者。

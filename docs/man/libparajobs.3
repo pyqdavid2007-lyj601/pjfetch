@@ -1,0 +1,143 @@
+.\" pjfetch 工程手册页 —— 由 groff 渲染（man / groff -Thtml）
+.TH LIBPARAJOBS 3 "2026-10-15" "pjfetch 0.1.0" "Library Functions"
+.SH NAME
+libparajobs \- 基于 libgo 协程的并行任务引擎（C ABI）
+.SH SYNOPSIS
+.nf
+.B #include <parajobs/parajobs.h>
+
+.B pjb_engine_t pjb_engine_create(int32_t min_threads, int32_t max_threads);
+.B void         pjb_engine_destroy(pjb_engine_t eng);
+.B pjb_status   pjb_engine_drain(pjb_engine_t eng, uint32_t timeout_ms);
+.B int32_t      pjb_engine_concurrency(pjb_engine_t eng);
+
+.B pjb_job_id pjb_submit(pjb_engine_t eng, pjb_job_fn fn, void *ud,
+.B "                       pjb_job_done_cb on_done, void *done_ud);"
+.B pjb_status pjb_job_cancel(pjb_engine_t eng, pjb_job_id id);
+.B int32_t    pjb_job_canceled(pjb_engine_t eng, pjb_job_id id);
+.B pjb_status pjb_job_wait(pjb_engine_t eng, pjb_job_id id, uint32_t timeout_ms);
+.B int32_t    pjb_job_is_done(pjb_engine_t eng, pjb_job_id id);
+
+.B void        pjb_sleep_ms(pjb_engine_t eng, uint32_t ms);
+.B const char *pjb_version(void);
+.fi
+
+.SH DESCRIPTION
+.B libparajobs
+把
+.BR libgo (3)
+的协程调度封装为\fB纯 C ABI\fP 的通用并行任务引擎：提交、协作式取消、等待与排空。
+公共头不泄漏 libgo 或 C++ 类型。
+.PP
+Windows 上 libgo 用 Win32 Fiber，并在\fB进程级\fP挂钩 winsock 的
+.BR select / recv / send / accept
+等函数，使阻塞式 socket 调用在协程内自动挂起——故任务体可直接使用阻塞网络 API。
+.SH TYPES
+.TP
+.B pjb_engine_t
+不透明引擎句柄。每个引擎持有自己的
+.B libgo
+调度器。
+.TP
+.B pjb_job_id
+任务标识（自 1 递增）；
+.B PJB_INVALID_JOB
+为 0，表示无效。
+.TP
+.B pjb_status
+状态码：
+.BR PJB_OK ,
+.BR PJB_ERR_INVALID_ARG ,
+.BR PJB_ERR_NOT_INITIALIZED ,
+.BR PJB_ERR_TIMEOUT ,
+.BR PJB_ERR_CANCELED ,
+.BR PJB_ERR_INTERNAL .
+.TP
+.B pjb_job_fn
+.B typedef void (*pjb_job_fn)(void *userdata);
+在调度线程上执行的任务体。
+.TP
+.B pjb_job_done_cb
+.B typedef void (*pjb_job_done_cb)(pjb_job_id id, void *ud);
+.br
+任务结束后\fB恰好触发一次\fP（取消未启动也触发）。回调内\fB禁止\fP对同一引擎调用
+.B pjb_engine_drain
+或
+.BR pjb_engine_destroy ，
+否则自等死锁。
+.SH RETURN VALUES
+.TP
+.B pjb_engine_create
+成功返回非空句柄；
+.I min_threads
+\(<= 0 取硬件并发数；
+.I max_threads
+\(<= 0 时取
+.IR min_threads .
+.TP
+.B pjb_submit
+成功返回非零任务 id；引擎无效或参数非法返回
+.BR PJB_INVALID_JOB .
+.TP
+.B pjb_job_wait
+.I timeout_ms
+为 0xFFFFFFFF 表示无限等待；超时返回
+.BR PJB_ERR_TIMEOUT ,
+未知任务 id 返回
+.BR PJB_ERR_INVALID_ARG .
+.TP
+.B pjb_job_is_done ", " pjb_job_canceled
+返回 1/0；未知 id 或引擎无效返回 \fB\-1\fP。
+.TP
+.B pjb_engine_concurrency
+返回调度器最大线程数；引擎无效返回 0。
+.TP
+.B pjb_engine_drain
+等待未完成任务数归零；超时返回
+.BR PJB_ERR_TIMEOUT .
+.SH THREADING
+创建与销毁应在单一线程进行。
+.BR pjb_submit ,
+.BR pjb_job_wait ,
+.BR pjb_job_cancel ,
+.BR pjb_job_is_done
+与
+.B pjb_job_canceled
+可从任意线程调用（包括从其他任务体内）。
+.PP
+.B pjb_engine_destroy
+会先排空全部任务（含
+.B on_done
+回调）再停止调度器；该操作不可逆，销毁后引擎不可再用。
+.B pjb_job_wait
+会阻塞调用线程，不应在协程内使用。
+.SH NOTES
+.B pjb_sleep_ms
+在调度线程内等价于协程睡眠（让出 fiber）；在普通线程上为标准库睡眠。
+.PP
+取消是\fB协作式\fP的：置位取消标志后，任务体需自行轮询
+.B pjb_job_canceled
+并尽早返回。
+.SH EXAMPLE
+.nf
+.RS
+static void work(void *ud) {
+        pjb_engine_t e = (pjb_engine_t)ud;
+        for (int i = 0; i < 10; ++i) {
+                if (pjb_job_canceled(e, PJB_INVALID_JOB)) return;
+                /* ... do work ... */
+                pjb_sleep_ms(e, 10);
+        }
+}
+
+pjb_engine_t e = pjb_engine_create(4, 8);
+pjb_job_id id = pjb_submit(e, work, e, NULL, NULL);
+pjb_job_wait(e, id, 0xFFFFFFFFu);
+pjb_engine_destroy(e);
+.RE
+.fi
+.SH SEE ALSO
+.BR libpjfetch (3),
+.BR wget\-curl (1)
+.SH AUTHORS
+pjfetch 项目贡献者。

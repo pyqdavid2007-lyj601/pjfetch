@@ -1,0 +1,176 @@
+.\" pjfetch 工程手册页 —— 由 groff 渲染（man / groff -Thtml）
+.TH LIBPJFETCH 3 "2026-10-15" "pjfetch 0.1.0" "Library Functions"
+.SH NAME
+libpjfetch \- 多段并发 HTTP(S) 下载库（C ABI）
+.SH SYNOPSIS
+.nf
+.B #include <pjfetch/pjfetch.h>
+
+.B pjf_downloader_t pjf_downloader_create(const pjf_options *opts);
+.B void             pjf_downloader_destroy(pjf_downloader_t dl);
+
+.B pjf_task_t pjf_download_start(pjf_downloader_t dl,
+.B "                             const char *out_override,"
+.B "                             pjf_progress_cb pcb, void *pcb_ud,"
+.B "                             pjf_status_cb scb, void *scb_ud);"
+.B pjf_err   pjf_download_wait(pjf_task_t task, uint32_t timeout_ms);
+.B void      pjf_download_cancel(pjf_task_t task);
+.B int32_t   pjf_download_is_running(pjf_task_t task);
+.B pjf_err   pjf_download_result(pjf_task_t task, pjf_result *out);
+
+.B pjf_err pjf_query_progress(pjf_task_t task, pjf_progress *out);
+.B int32_t pjf_query_segments(pjf_task_t task, pjf_segment *buf, int32_t cap);
+.B int32_t pjf_get_header(pjf_task_t task, const char *name, char *buf, int32_t cap);
+.B int32_t pjf_last_error(pjf_task_t task, char *buf, int32_t cap);
+
+.B pjf_err pjf_download(pjf_downloader_t dl, const pjf_options *opts,
+.B "                      pjf_progress_cb pcb, void *ud, pjf_result *out);"
+.B const char *pjf_version(void);
+.fi
+
+.SH DESCRIPTION
+.B libpjfetch
+在
+.BR libparajobs (3)
+的任务引擎之上实现多段并发下载：探测、规划分段、并行传输、聚合进度，
+并维护断点续传所需的 sidecar。接口为\fB纯 C ABI\fP（不透明句柄 + 函数指针回调 +
+错误码），公共头不泄漏 C++ 或第三方类型。
+.PP
+字符串约定：所有
+.B const char *
+入参\fB深拷贝\fP；出参走调用方提供的缓冲区；库不返回需要释放的堆字符串。
+.SH TYPES
+.TP
+.B pjf_downloader_t
+下载器句柄：持有选项与一个
+.BR libparajobs (3)
+引擎。
+.TP
+.B pjf_task_t
+一次下载任务的句柄。
+.TP
+.B pjf_err
+错误码枚举：
+.BR PJF_OK ,
+.BR PJF_ERR_INVALID_ARG ,
+.BR PJF_ERR_BAD_URL ,
+.BR PJF_ERR_IO ,
+.BR PJF_ERR_DISK_FULL ,
+.BR PJF_ERR_NETWORK ,
+.BR PJF_ERR_HTTP_STATUS ,
+.BR PJF_ERR_RANGE_UNSUPPORTED ,
+.BR PJF_ERR_CANCELED ,
+.BR PJF_ERR_TOO_MANY_RETRIES ,
+.BR PJF_ERR_TIMEOUT ,
+.BR PJF_ERR_INTERNAL .
+.TP
+.B pjf_phase
+阶段枚举：
+.BR PJF_PHASE_INIT / PROBE / DOWNLOAD / FINALIZE / DONE / ERROR .
+.TP
+.B pjf_options
+下载选项。主要字段：URL、输出路径、
+.I N_segments
+（0 表示 8，钳到 1..64）、每段重试次数、连接/传输超时、低速中止阈值与持续时间、
+最小分段字节数、User\-Agent、Referer、Proxy、附加请求头、线程上下限，以及
+.I flags
+位标志
+.RB ( PJF_FLAG_VERIFY_SSL ", " PJF_FLAG_VERBOSE ", " PJF_FLAG_RESUME ", " PJF_FLAG_KEEP_META ).
+.TP
+.B pjf_result
+结果：错误码、人读消息（512 字节缓冲）、字节数、HTTP 状态、耗时、是否续传、
+是否使用 Range、实际分段数。
+.SH CALLBACKS
+两种回调只在\fB单个 sampler 协程线程\fP上触发（约 4Hz，互不并发）：
+.PP
+.B typedef void (*pjf_progress_cb)(const pjf_progress *p, void *ud);
+.B typedef void (*pjf_status_cb)(int32_t phase, pjf_err last_err, int32_t http_status, void *ud);
+.PP
+回调内可以安全调用
+.BR pjf_query_progress (3),
+.BR pjf_query_segments (3)
+与
+.BR pjf_download_cancel (3)；
+不得在回调内销毁下载器。
+.PP
+\fB触发范围\fP：sampler 只在真正进入下载阶段后运行。若任务在探测/预分配/提交分段阶段
+即失败（URL 不可达、404、无法建流等），回调一次也不会触发——这类早期失败必须通过
+.BR pjf_download_wait ()
+配合
+.BR pjf_download_result ()
+读取结果获知。
+.SH RETURN VALUES
+.TP
+.B pjf_downloader_create
+成功返回非空句柄；选项非法（NULL、空 URL、非 http/https 协议）返回
+.BR NULL ;
+创建引擎失败也返回
+.BR NULL .
+.TP
+.B pjf_download_wait
+.I timeout_ms
+为 0 表示\fB无限等待\fP直至任务终态；非 0 为等待上限，超时返回
+.BR PJF_ERR_TIMEOUT ;
+任务已达终态返回
+.BR PJF_OK ;
+句柄无效返回
+.BR PJF_ERR_INVALID_ARG .
+.TP
+.B pjf_download_result
+返回
+.B PJF_OK
+表示结果已成功填入
+.IR out ；
+\fB下载本身的成败在\fP
+.IB out\->err
+\fB中\fP。句柄无效返回
+.BR PJF_ERR_INVALID_ARG .
+.TP
+.B pjf_download
+阻塞便捷版（内部等价于 start \+ wait(0) \+ result）；返回值语义同
+.BR pjf_download_result .
+.TP
+.B pjf_download_is_running
+1 运行中，0 非运行，\-1 句柄无效。
+.TP
+.B pjf_query_segments
+返回写入的分段数；当
+.I buf
+为 NULL 时返回所需数量。
+.TP
+.B pjf_get_header
+在探测/最终响应头中大小写不敏感查找，返回写入字节数；未找到返回 \fB\-1\fP。
+.TP
+.B pjf_last_error
+返回消息\fB完整长度\fP（snprintf 语义，可能大于
+.IR cap ）；缓冲区始终以 NUL 结尾且不越界。
+.SH THREADING
+.B pjf_download_start
+可由任意线程调用；下载全部在库内部引擎的协程中执行。
+.B pjf_download_wait
+会阻塞调用线程，应只在非协程线程（如主线程）使用。
+.B pjf_download_cancel
+线程安全，可从信号/Ctrl+C 处理器调用。
+.SH EXAMPLE
+.nf
+.RS
+pjf_options o = {0};
+o.url = "https://example.com/big.bin";
+o.N_segments = 8;
+o.max_retry = 3;
+o.low_speed_limit = 1024;
+
+pjf_downloader_t d = pjf_downloader_create(&o);
+pjf_result r;
+if (pjf_download(d, &o, NULL, NULL, &r) == PJF_OK && r.err == PJF_OK)
+        printf("saved %lld bytes\\n", (long long)r.bytes);
+else
+        fprintf(stderr, "failed: %s\\n", r.message);
+pjf_downloader_destroy(d);
+.RE
+.fi
+.SH SEE ALSO
+.BR wget\-curl (1),
+.BR libparajobs (3)
+.SH AUTHORS
+pjfetch 项目贡献者。

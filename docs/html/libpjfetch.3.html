@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIBPJFETCH</title>
+<style>
+:root { --fg:#1f2328; --muted:#656d76; --line:#d8dee4; --bg-pre:#f6f8fa; --link:#0969da; }
+* { box-sizing: border-box; }
+body { max-width: 50rem; margin: 2.5rem auto 5rem; padding: 0 1.25rem;
+       color: var(--fg); line-height: 1.75;
+       font: 16px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", Roboto, sans-serif; }
+h1 { font-size: 1.75rem; margin: 0 0 .35rem; }
+h2 { font-size: 1.2rem; margin: 2.2rem 0 .8rem; padding-bottom: .3rem;
+     border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 .6rem; }
+p  { margin: .55rem 0; }
+pre { margin: .7rem 0; padding: .75rem 1rem; overflow-x: auto;
+      background: var(--bg-pre); border: 1px solid var(--line); border-radius: 6px;
+      font: .9rem/1.6 Consolas, "Cascadia Mono", Menlo, monospace; }
+code { font: .9em/1.5 Consolas, "Cascadia Mono", Menlo, monospace;
+       background: var(--bg-pre); padding: .1em .35em; border-radius: 4px; }
+dl { margin: .5rem 0 1.2rem; }
+dt { font-weight: 600; margin-top: .9rem; }
+dt + dd { margin-top: .1rem; }
+dd { margin: .1rem 0 0 1.5rem; }
+dd p { margin: .3rem 0; }
+.meta { color: var(--muted); font-size: .85rem; margin: 0 0 1.6rem; }
+</style>
+</head>
+<body>
+<h1>LIBPJFETCH</h1>
+<p class="meta">pjfetch 0.1.0 · section 3 · 2026-10-15</p>
+<h2>NAME</h2>
+<p>libpjfetch - 多段并发 HTTP(S) 下载库（C ABI）</p>
+<h2>SYNOPSIS</h2>
+<pre>
+<b>#include</b> <b>&lt;pjfetch/pjfetch.h&gt;</b>
+
+<b>pjf_downloader_t</b> <b>pjf_downloader_create(const</b> <b>pjf_options</b> <b>*opts);</b>
+<b>void</b> <b>pjf_downloader_destroy(pjf_downloader_t</b> <b>dl);</b>
+
+<b>pjf_task_t</b> <b>pjf_download_start(pjf_downloader_t</b> <b>dl,</b>
+<b>                             const char *out_override,</b>
+<b>                             pjf_progress_cb pcb, void *pcb_ud,</b>
+<b>                             pjf_status_cb scb, void *scb_ud);</b>
+<b>pjf_err</b> <b>pjf_download_wait(pjf_task_t</b> <b>task,</b> <b>uint32_t</b> <b>timeout_ms);</b>
+<b>void</b> <b>pjf_download_cancel(pjf_task_t</b> <b>task);</b>
+<b>int32_t</b> <b>pjf_download_is_running(pjf_task_t</b> <b>task);</b>
+<b>pjf_err</b> <b>pjf_download_result(pjf_task_t</b> <b>task,</b> <b>pjf_result</b> <b>*out);</b>
+
+<b>pjf_err</b> <b>pjf_query_progress(pjf_task_t</b> <b>task,</b> <b>pjf_progress</b> <b>*out);</b>
+<b>int32_t</b> <b>pjf_query_segments(pjf_task_t</b> <b>task,</b> <b>pjf_segment</b> <b>*buf,</b> <b>int32_t</b> <b>cap);</b>
+<b>int32_t</b> <b>pjf_get_header(pjf_task_t</b> <b>task,</b> <b>const</b> <b>char</b> <b>*name,</b> <b>char</b> <b>*buf,</b> <b>int32_t</b> <b>cap);</b>
+<b>int32_t</b> <b>pjf_last_error(pjf_task_t</b> <b>task,</b> <b>char</b> <b>*buf,</b> <b>int32_t</b> <b>cap);</b>
+
+<b>pjf_err</b> <b>pjf_download(pjf_downloader_t</b> <b>dl,</b> <b>const</b> <b>pjf_options</b> <b>*opts,</b>
+<b>                      pjf_progress_cb pcb, void *ud, pjf_result *out);</b>
+<b>const</b> <b>char</b> <b>*pjf_version(void);</b>
+</pre>
+<h2>DESCRIPTION</h2>
+<p><b>libpjfetch</b> 在 <b>libparajobs</b> (3) 的任务引擎之上实现多段并发下载：探测、规划分段、并行传输、聚合进度，并维护断点续传所需的 sidecar。接口为纯 C ABI（不透明句柄 + 函数指针回调 + 错误码），公共头不泄漏 C++ 或第三方类型。</p>
+<p>字符串约定：所有 <b>const</b> <b>char</b> <b>*</b> 入参深拷贝；出参走调用方提供的缓冲区；库不返回需要释放的堆字符串。</p>
+<h2>TYPES</h2>
+<dl>
+<dt><b>pjf_downloader_t</b></dt><dd>
+<p>下载器句柄：持有选项与一个 <b>libparajobs</b> (3) 引擎。</p>
+</dd>
+<dt><b>pjf_task_t</b></dt><dd>
+<p>一次下载任务的句柄。</p>
+</dd>
+<dt><b>pjf_err</b></dt><dd>
+<p>错误码枚举： <b>PJF_OK</b>, <b>PJF_ERR_INVALID_ARG</b>, <b>PJF_ERR_BAD_URL</b>, <b>PJF_ERR_IO</b>, <b>PJF_ERR_DISK_FULL</b>, <b>PJF_ERR_NETWORK</b>, <b>PJF_ERR_HTTP_STATUS</b>, <b>PJF_ERR_RANGE_UNSUPPORTED</b>, <b>PJF_ERR_CANCELED</b>, <b>PJF_ERR_TOO_MANY_RETRIES</b>, <b>PJF_ERR_TIMEOUT</b>, <b>PJF_ERR_INTERNAL</b>.</p>
+</dd>
+<dt><b>pjf_phase</b></dt><dd>
+<p>阶段枚举： <b>PJF_PHASE_INIT</b> / <b>PROBE</b> / <b>DOWNLOAD</b> / <b>FINALIZE</b> / <b>DONE</b> / <b>ERROR</b>.</p>
+</dd>
+<dt><b>pjf_options</b></dt><dd>
+<p>下载选项。主要字段：URL、输出路径、 <i>N_segments</i>（0 表示 8，钳到 1..64）、每段重试次数、连接/传输超时、低速中止阈值与持续时间、最小分段字节数、User-Agent、Referer、Proxy、附加请求头、线程上下限，以及 <i>flags</i> 位标志 (<b>PJF_FLAG_VERIFY_SSL</b>, <b>PJF_FLAG_VERBOSE</b>, <b>PJF_FLAG_RESUME</b>, <b>PJF_FLAG_KEEP_META</b>).</p>
+</dd>
+<dt><b>pjf_result</b></dt><dd>
+<p>结果：错误码、人读消息（512 字节缓冲）、字节数、HTTP 状态、耗时、是否续传、是否使用 Range、实际分段数。</p>
+</dd>
+</dl>
+<h2>CALLBACKS</h2>
+<p>两种回调只在单个 sampler 协程线程上触发（约 4Hz，互不并发）：</p>
+<p><b>typedef</b> <b>void</b> <b>(*pjf_progress_cb)(const</b> <b>pjf_progress</b> <b>*p,</b> <b>void</b> <b>*ud);</b> <b>typedef</b> <b>void</b> <b>(*pjf_status_cb)(int32_t</b> <b>phase,</b> <b>pjf_err</b> <b>last_err,</b> <b>int32_t</b> <b>http_status,</b> <b>void</b> <b>*ud);</b></p>
+<p>回调内可以安全调用 <b>pjf_query_progress</b> (3), <b>pjf_query_segments</b> (3) 与 <b>pjf_download_cancel</b> (3)；不得在回调内销毁下载器。</p>
+<p>触发范围：sampler 只在真正进入下载阶段后运行。若任务在探测/预分配/提交分段阶段即失败（URL 不可达、404、无法建流等），回调一次也不会触发——这类早期失败必须通过 <b>pjf_download_wait</b> () 配合 <b>pjf_download_result</b> () 读取结果获知。</p>
+<h2>RETURN VALUES</h2>
+<dl>
+<dt><b>pjf_downloader_create</b></dt><dd>
+<p>成功返回非空句柄；选项非法（NULL、空 URL、非 http/https 协议）返回 <b>NULL</b>; 创建引擎失败也返回 <b>NULL</b>.</p>
+</dd>
+<dt><b>pjf_download_wait</b></dt><dd>
+<p><i>timeout_ms</i> 为 0 表示无限等待直至任务终态；非 0 为等待上限，超时返回 <b>PJF_ERR_TIMEOUT</b>; 任务已达终态返回 <b>PJF_OK</b>; 句柄无效返回 <b>PJF_ERR_INVALID_ARG</b>.</p>
+</dd>
+<dt><b>pjf_download_result</b></dt><dd>
+<p>返回 <b>PJF_OK</b> 表示结果已成功填入 <i>out</i>；下载本身的成败在 out-&gt;err 中。句柄无效返回 <b>PJF_ERR_INVALID_ARG</b>.</p>
+</dd>
+<dt><b>pjf_download</b></dt><dd>
+<p>阻塞便捷版（内部等价于 start \+ wait(0) \+ result）；返回值语义同 <b>pjf_download_result</b>.</p>
+</dd>
+<dt><b>pjf_download_is_running</b></dt><dd>
+<p>1 运行中，0 非运行，-1 句柄无效。</p>
+</dd>
+<dt><b>pjf_query_segments</b></dt><dd>
+<p>返回写入的分段数；当 <i>buf</i> 为 NULL 时返回所需数量。</p>
+</dd>
+<dt><b>pjf_get_header</b></dt><dd>
+<p>在探测/最终响应头中大小写不敏感查找，返回写入字节数；未找到返回 -1。</p>
+</dd>
+<dt><b>pjf_last_error</b></dt><dd>
+<p>返回消息完整长度（snprintf 语义，可能大于 <i>cap</i>）；缓冲区始终以 <i>NUL</i> 结尾且不越界。</p>
+</dd>
+</dl>
+<h2>THREADING</h2>
+<p><b>pjf_download_start</b> 可由任意线程调用；下载全部在库内部引擎的协程中执行。 <b>pjf_download_wait</b> 会阻塞调用线程，应只在非协程线程（如主线程）使用。 <b>pjf_download_cancel</b> 线程安全，可从信号/Ctrl+C 处理器调用。</p>
+<h2>EXAMPLE</h2>
+<pre>
+pjf_options o = {0};
+o.url = &quot;https://example.com/big.bin&quot;;
+o.N_segments = 8;
+o.max_retry = 3;
+o.low_speed_limit = 1024;
+
+pjf_downloader_t d = pjf_downloader_create(&amp;o);
+pjf_result r;
+if (pjf_download(d, &amp;o, NULL, NULL, &amp;r) == PJF_OK &amp;&amp; r.err == PJF_OK)
+        printf(&quot;saved %lld bytes\n&quot;, (long long)r.bytes);
+else
+        fprintf(stderr, &quot;failed: %s\n&quot;, r.message);
+pjf_downloader_destroy(d);
+</pre>
+<h2>SEE ALSO</h2>
+<p><b>wget-curl</b> (1), <b>libparajobs</b> (3)</p>
+<h2>AUTHORS</h2>
+<p>pjfetch 项目贡献者。</p>
+</body>
+</html>
